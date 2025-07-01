@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Info Waktu Sederhana</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <style>
+        body {
+            display: flex;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0; /* Latar belakang sederhana */
+            font-family: Arial, sans-serif; /* Font sederhana */
+            color: #333;
+            position: relative; /* Diperlukan untuk penempatan absolut kontainer */
+        }
+        .container {
+            position: absolute; /* Penempatan absolut */
+            bottom: 20px; /* 20px dari bawah */
+            left: 20px; /* 20px dari kiri */
+            text-align: left; /* Teks rata kiri di dalam kontainer */
+            padding: 8px 12px; /* Padding lebih kecil, sedikit lebih lebar horizontal */
+            border: 1px solid #ccc; /* Border sederhana */
+            border-radius: 8px;
+            background-color: #fff;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05); /* Bayangan lebih ringan */
+            width: fit-content; /* Lebar sesuai konten */
+            max-width: 95%; /* Mencegah overflow pada layar kecil */
+
+            /* Flexbox untuk tampilan satu baris */
+            display: flex;
+            align-items: center; /* Pusatkan vertikal */
+            flex-wrap: wrap; /* Izinkan baris baru jika terlalu panjang */
+            gap: 8px; /* Jarak antar item */
+        }
+        #combined-info {
+            font-size: 0.6em; /* Ukuran font sangat kecil */
+            color: #333; /* Warna teks lebih gelap untuk keterbacaan */
+            white-space: nowrap; /* Pastikan item tidak pecah baris */
+        }
+        #combined-info .countdown-italic {
+            font-style: italic;
+            color: #28a745; /* Warna hijau untuk hitungan mundur */
+            font-weight: bold;
+        }
+        .error-message {
+            font-size: 0.7em; /* Ukuran font pesan error lebih kecil */
+            color: red;
+            margin-top: 5px;
+            width: 100%; /* Pastikan pesan error di baris baru jika flex-wrap */
+        }
+
+        /* Gaya untuk efek berkedip */
+        @keyframes blink {
+            0% { opacity: 1; }
+            50% { opacity: 0; }
+            100% { opacity: 1; }
+        }
+        .blink {
+            animation: blink 1s step-end infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <span id="combined-info"></span>
+        <span id="error-message" class="error-message"></span>
+    </div>
+
+    <script>
+        // Elemen-elemen DOM yang relevan
+        const combinedInfoElement = document.getElementById('combined-info');
+        const errorMessageElement = document.getElementById('error-message');
+
+        // Data untuk perhitungan weton
+        const pasaran = ["Legi", "Paing", "Kliwon", "Pahing", "Pon"];
+        const dina = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+
+        // Variabel global untuk jadwal sholat dan lokasi
+        let jadwalSholat = {};
+        let userLatitude = -7.5586; // Default: Surakarta
+        let userLongitude = 110.8333; // Default: Surakarta
+        let userCity = "Surakarta"; // Default: Surakarta
+        let userCountry = "Indonesia"; // Default: Indonesia
+
+        // Global variables to hold formatted parts
+        let wetonText = '';
+        let masehiText = '';
+        let hijriText = 'Memuat Kalender Hijriyah...'; // Initial state for Hijri
+
+        // --- Fungsi Perhitungan Weton ---
+        function getDayNumber(date) {
+            // Menghitung jumlah hari sejak epoch (1 Januari 1970)
+            return Math.floor(date.getTime() / (1000 * 60 * 60 * 24));
+        }
+
+        function getWeton(date) {
+            const dayNumber = getDayNumber(date);
+            const indexDina = date.getDay(); // 0=Minggu, 1=Senin, dst.
+            // Rumus indexPasaran disesuaikan untuk menghasilkan Kliwon pada Rabu, 2 Juli 2025
+            const indexPasaran = (dayNumber + 2) % 5; 
+            return {
+                dina: dina[indexDina],
+                pasaran: pasaran[indexPasaran],
+            };
+        }
+
+        // --- Fungsi untuk Mendapatkan Tanggal Hijriyah ---
+        async function fetchHijriDate() {
+            const now = new Date();
+            const day = String(now.getDate()).padStart(2, '0');
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const year = now.getFullYear();
+            const dateString = `${day}-${month}-${year}`;
+
+            const url = `https://api.aladhan.com/v1/gToH?date=${dateString}`;
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+
+                if (data.data && data.data.hijri) {
+                    const hijri = data.data.hijri;
+                    // Menggunakan hijri.month.en untuk nama bulan Latin
+                    hijriText = `${hijri.day} ${hijri.month.en} ${hijri.year} H`;
+                } else {
+                    hijriText = '(Gagal memuat Hijriyah)';
+                }
+            } catch (error) {
+                console.error('Error fetching Hijri date:', error);
+                hijriText = '(Gagal memuat Hijriyah)';
+            }
+            updateCombinedDisplay(); // Perbarui tampilan setelah Hijriyah dimuat
+        }
+
+        // --- 1. Update Tampilan Tanggal dan Weton ---
+        function updateDisplay() {
+            const now = new Date();
+
+            // Tanggal Masehi: dd mmmYYYY
+            const optionsMasehi = {
+                day: '2-digit',
+                month: 'short', // 'short' untuk mmm (misal: Jul)
+                year: 'numeric'
+            };
+            masehiText = now.toLocaleDateString('id-ID', optionsMasehi);
+
+            // Weton (Pasaran Jawa)
+            // Maghrib dianggap sebagai awal hari Jawa berikutnya (tetap 18:00)
+            const maghribHour = 18;
+            const maghribMinute = 0;
+            let displayWeton = "";
+
+            if (now.getHours() > maghribHour || (now.getHours() === maghribHour && now.getMinutes() >= maghribMinute)) {
+                // Jika sudah melewati Maghrib, weton adalah untuk hari berikutnya
+                const tomorrow = new Date(now.getTime() + 86400000); // Tambah 24 jam (dalam ms)
+                const w = getWeton(tomorrow);
+                displayWeton = `Malam ${w.dina} ${w.pasaran}`;
+            } else {
+                // Jika belum melewati Maghrib, weton adalah untuk hari ini
+                const w = getWeton(now);
+                displayWeton = `${w.dina} ${w.pasaran}`;
+            }
+            wetonText = `${displayWeton}`;
+
+            updateCombinedDisplay(); // Perbarui tampilan setelah Masehi/Weton dimuat
+        }
+
+        // --- 2. Dapatkan Lokasi Pengguna ---
+        function getUserLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(position => {
+                    userLatitude = position.coords.latitude;
+                    userLongitude = position.coords.longitude;
+                    
+                    // Geocoding terbalik (mengubah koordinat menjadi nama lokasi)
+                    fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${userLatitude}&lon=${userLongitude}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.address) {
+                                userCity = data.address.city || data.address.town || data.address.village || data.address.county || 'Tidak Diketahui';
+                                userCountry = data.address.country || 'Tidak Diketahui';
+                            } else {
+                                console.warn('Gagal mendapatkan nama lokasi, menggunakan koordinat.');
+                            }
+                            fetchPrayerTimes(); // Panggil setelah lokasi ditemukan
+                        })
+                        .catch(error => {
+                            errorMessageElement.textContent = `Gagal mendapatkan nama lokasi. Error: ${error.message || 'Tidak diketahui'}`;
+                            console.error('Error fetching location name:', error);
+                            fetchPrayerTimes(); // Tetap coba dapatkan waktu sholat
+                        });
+
+                }, error => {
+                    let errorMessage = 'Akses lokasi ditolak atau tidak tersedia.';
+                    if (error.code) {
+                        errorMessage += ` (Kode: ${error.code}`;
+                        if (error.message) {
+                            errorMessage += `, Pesan: ${error.message}`;
+                        }
+                        errorMessage += `)`;
+                    }
+                    errorMessage += ` Menggunakan lokasi default.`;
+                    errorMessageElement.textContent = errorMessage;
+                    console.error('Error getting geolocation:', error);
+                    fetchPrayerTimes(); // Gunakan lokasi default
+                });
+            } else {
+                errorMessageElement.textContent = 'Geolocation tidak didukung oleh browser ini. Menggunakan lokasi default.';
+                fetchPrayerTimes(); // Gunakan lokasi default
+            }
+        }
+
+        // --- 3. Dapatkan Waktu Sholat ---
+        async function fetchPrayerTimes() {
+            errorMessageElement.textContent = ''; // Hapus pesan error sebelumnya
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = today.getMonth() + 1; // Bulan dimulai dari 0
+            const day = today.getDate();
+
+            const url = `https://api.aladhan.com/v1/timings/${day}-${month}-${year}?latitude=${userLatitude}&longitude=${userLongitude}&method=2`;
+            
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+
+                if (data.data && data.data.timings) {
+                    jadwalSholat = data.data.timings; // Simpan jadwal sholat
+                    updateCombinedDisplay(); // Perbarui tampilan setelah jadwal sholat dimuat
+                } else {
+                    errorMessageElement.textContent = 'Data waktu sholat tidak ditemukan.';
+                }
+            } catch (error) {
+                errorMessageElement.textContent = 'Tidak dapat memuat waktu sholat. Periksa koneksi internet atau coba lagi.';
+                console.error('Error fetching prayer times:', error);
+            }
+        }
+
+        // --- 4. Countdown Waktu Sholat Berikutnya ---
+        function getNextPrayerTime() {
+            // Pastikan jadwalSholat sudah ada
+            if (Object.keys(jadwalSholat).length === 0) return null;
+
+            const now = new Date();
+            const todayDateString = now.toISOString().split('T')[0]; //YYYY-MM-DD
+
+            // Urutan waktu sholat yang relevan untuk countdown (hanya 5 waktu sholat utama)
+            // Mengubah nama tampilan waktu sholat
+            const keys = [
+                { apiName: "Fajr", displayName: "Subuh" },
+                { apiName: "Dhuhr", displayName: "Dhuhur" },
+                { apiName: "Asr", displayName: "Ashar" },
+                { apiName: "Maghrib", displayName: "Magrib" },
+                { apiName: "Isha", displayName: "Isya'" }
+            ];
+
+            for (let key of keys) {
+                if (jadwalSholat[key.apiName]) { // Pastikan waktu sholat ada
+                    const [hour, minute] = jadwalSholat[key.apiName].split(":");
+                    const prayerTime = new Date(`${todayDateString}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00`);
+                    if (now < prayerTime) {
+                        return { name: key.displayName, time: prayerTime };
+                    }
+                }
+            }
+
+            // Jika semua waktu sholat hari ini sudah lewat, hitung untuk Subuh besok
+            if (jadwalSholat.Fajr) {
+                const [hour, minute] = jadwalSholat.Fajr.split(":");
+                const nextDay = new Date(now.getTime() + 86400000); // Tambah 24 jam (dalam ms)
+                const nextDayDateString = nextDay.toISOString().split('T')[0];
+                const nextFajr = new Date(`${nextDayDateString}T${hour}:${minute}:00`);
+                return { name: "Subuh", time: nextFajr };
+            }
+            return null; // Jika tidak ada jadwal sholat sama sekali
+        }
+
+        // --- Fungsi baru untuk menggabungkan dan memperbarui satu baris tampilan ---
+        function updateCombinedDisplay() {
+            const nextPrayer = getNextPrayerTime();
+            let countdownPart = '';
+            let shouldBlink = false;
+
+            if (!nextPrayer) {
+                countdownPart = "Jadwal sholat tidak tersedia.";
+            } else {
+                const now = new Date();
+                const diff = nextPrayer.time - now; // Selisih dalam milidetik
+
+                if (diff < 0) {
+                    countdownPart = `Menuju Sholat ${nextPrayer.name}: Waktu sudah lewat.`;
+                } else {
+                    const h = String(Math.floor(diff / 3600000)).padStart(2, '0');
+                    const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2, '0');
+                    const s = String(Math.floor((diff % 60000) / 1000)).padStart(2, '0');
+                    countdownPart = `Menuju Sholat ${nextPrayer.name}: <i class="fa-thin fa-clock countdown-italic">${h}:${m}:${s}</i>`; // Italic countdown
+                    if (diff <= 300000) { // 5 menit = 300000 ms
+                        shouldBlink = true;
+                    }
+                }
+            }
+
+            // Format akhir: Hari Pasaran | kalender Masehi | Kalender Hijriyah | Kalender Jawa - Menuju sholat : Subuh (countdown 'italic')
+            const fullText = `${wetonText} | ${masehiText} / ${hijriText} / Kalender Jawa - ${countdownPart}`;
+            combinedInfoElement.innerHTML = fullText;
+
+            // Terapkan/hapus kelas blink pada elemen utama
+            if (shouldBlink) {
+                combinedInfoElement.classList.add('blink');
+            } else {
+                combinedInfoElement.classList.remove('blink');
+            }
+        }
+
+
+        // --- Inisialisasi ---
+        // Panggil fungsi untuk mendapatkan lokasi saat halaman dimuat
+        getUserLocation();
+        // Panggil fungsi untuk mendapatkan tanggal Hijriyah saat halaman dimuat
+        fetchHijriDate();
+
+        // Perbarui tampilan setiap 100 milidetik (untuk kehalusan detik)
+        setInterval(() => {
+            updateDisplay(); // Memperbarui wetonText, masehiText, dan memanggil updateCombinedDisplay
+            // updateSholatCountdown() tidak dipanggil langsung lagi karena sudah di dalam updateCombinedDisplay
+        }, 100);
+
+        // Panggil updateDisplay sekali saat dimuat untuk inisialisasi awal
+        updateDisplay();
+    </script>
+</body>
+</html>
